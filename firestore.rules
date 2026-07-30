@@ -1,0 +1,73 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // To grant admin status to a user, create a document at admins/<their-uid> in the Firebase Console (e.g. { grantedAt: request.time })
+    function isAdmin() {
+      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // --- Admin Collection Rules ---
+    // Documents in admins/{uid} can be created ONLY by ayaicrypcoin@gmail.com or existing admins
+    match /admins/{adminUid} {
+      allow get: if isSignedIn() && (request.auth.uid == adminUid || isAdmin());
+      allow create: if isSignedIn() && request.auth.uid == adminUid && (request.auth.token.email.toLowerCase() == "ayaicrypcoin@gmail.com" || isAdmin());
+      allow list, update, delete: if isAdmin();
+    }
+
+    // --- User Rules ---
+    match /users/{userId} {
+      allow get, list: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId);
+      allow update: if isOwner(userId) || isAdmin();
+
+      // Subcollections (sessions, notebooks, chats, checkout_sessions, portal_sessions, subscriptions)
+      match /{allPaths=**} {
+        allow get, list: if isOwner(userId) || isAdmin();
+        allow create, update, delete: if isOwner(userId);
+      }
+    }
+
+    // --- Payment Requests (JazzCash / EasyPaisa / Card Manual Verification) ---
+    match /payment_requests/{requestId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // --- Collection Group Rules for Admin Queries ---
+    match /{path=**}/sessions/{sessionId} {
+      allow read: if (isSignedIn() && resource.data.userId == request.auth.uid) || isAdmin();
+    }
+
+    match /{path=**}/notebooks/{notebookId} {
+      allow read: if (isSignedIn() && resource.data.userId == request.auth.uid) || isAdmin();
+    }
+
+    // --- Public Progress Shares Rules ---
+    match /progress_shares/{shareId} {
+      allow read, create, update: if true;
+    }
+
+    // --- Group Study Rooms (Real-time Collaboration) ---
+    match /group_study_rooms/{roomId} {
+      allow read, write: if true;
+
+      match /{allPaths=**} {
+        allow read, write: if true;
+      }
+    }
+  }
+}
+
